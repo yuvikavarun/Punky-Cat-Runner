@@ -5,44 +5,69 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Punky Cat Runner</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; }
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      background: #000; 
+      font-family: 'Press Start 2P', 'Courier New', monospace;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+    }
+    
     #score {
       position: absolute;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
       color: #0ff;
-      font-family: monospace;
-      font-size: 18px;
+      font-family: 'Press Start 2P', 'Courier New', monospace;
+      font-size: 14px;
       z-index: 1;
-      text-shadow: 0 0 10px #0ff;
+      text-shadow: 0 0 10px #0ff, 0 0 20px #0ff, 2px 2px 0px #000;
+      letter-spacing: 1px;
     }
+    
     #debug {
       position: absolute;
       top: 40px;
       left: 10px;
       color: #ff0;
-      font-family: monospace;
-      font-size: 12px;
+      font-family: 'Press Start 2P', 'Courier New', monospace;
+      font-size: 8px;
       z-index: 1;
+      text-shadow: 0 0 5px #ff0, 1px 1px 0px #000;
+      line-height: 1.4;
     }
+    
     #instructions {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
       color: #ff00ff;
-      font-family: monospace;
-      font-size: 24px;
+      font-family: 'Press Start 2P', 'Courier New', monospace;
+      font-size: 16px;
       text-align: center;
       z-index: 1;
-      text-shadow: 0 0 15px #ff00ff;
+      text-shadow: 0 0 15px #ff00ff, 0 0 30px #ff00ff, 3px 3px 0px #000;
+      letter-spacing: 2px;
+      line-height: 1.6;
+    }
+    
+    #instructions small {
+      font-size: 10px;
+      letter-spacing: 1px;
+      display: block;
+      margin-top: 20px;
     }
   </style>
 </head>
 <body>
   <div id="score">Score: 0 | Best: 0</div>
-  <div id="debug">Press SPACE or Click to Jump! | Down Arrow to Fast Fall</div>
+  <div id="debug">Press SPACE or Click to Jump!<br>Down Arrow to Fast Fall</div>
   <div id="instructions">PUNKY CAT RUNNER<br><small>Press SPACE or Click to Start</small></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
@@ -52,13 +77,13 @@
     let fastFalling = false;
     const gravity = -0.005;
     const jumpForce = 0.18;
-    const fastFallForce = -0.015; // Faster downward force
+    const fastFallForce = -0.08; // Much faster immediate fall
     const groundY = -1.5;
     const scoreEl = document.getElementById("score");
     const debugEl = document.getElementById("debug");
     const instructionsEl = document.getElementById("instructions");
     let lastObstacleTime = 0;
-    const minObstacleGap = 600; // Reduced from 800 to 600ms
+    const minObstacleGap = 600;
     let gameStarted = false;
     let gameOver = false;
 
@@ -109,7 +134,7 @@
         // Down arrow key for fast falling
         if (e.code === "ArrowDown" || e.key === "ArrowDown" || e.keyCode === 40) {
           e.preventDefault();
-          if (gameStarted && !gameOver) {
+          if (gameStarted && !gameOver && jumping) {
             fastFall();
           }
         }
@@ -384,32 +409,36 @@
     function startGame() {
       gameStarted = true;
       gameOver = false;
-      score = 0; // Reset score when starting a new game
-      speed = 0.02; // Reset speed
+      score = 0;
+      speed = 0.02;
       scoreEl.innerText = `Score: ${score} | Best: ${highestScore}`;
       instructionsEl.style.display = 'none';
-      debugEl.innerText = 'Jump to avoid obstacles! | Down Arrow to Fast Fall';
-      // Set to trigger first obstacle immediately
+      debugEl.innerHTML = 'Jump to avoid obstacles!<br>Down Arrow to Fast Fall';
       lastObstacleTime = Date.now() - minObstacleGap - 100;
-      // Spawn the first obstacle right away
       setTimeout(() => {
         if (gameStarted && !gameOver) {
           spawnObstacle();
         }
-      }, 300); // First obstacle appears after 300ms
+      }, 300);
     }
 
     function jump() {
       if (!jumping && gameStarted && !gameOver) {
         jumpVel = jumpForce;
         jumping = true;
-        fastFalling = false; // Stop fast falling when jumping
+        fastFalling = false;
       }
     }
 
     function fastFall() {
       if (jumping && cat.position.y > groundY + 0.5) {
         fastFalling = true;
+        jumpVel = fastFallForce; // Immediately apply fast fall force
+        // Make fall completely immediate - slam down to ground
+        cat.position.y = groundY + 0.5;
+        jumping = false;
+        fastFalling = false;
+        jumpVel = 0;
       }
     }
 
@@ -423,7 +452,7 @@
       ctx.imageSmoothingEnabled = false;
       
       // Scale based on size (0.5 to 1.5)
-      const scale = size / 0.8; // Normalize to make scaling more visible
+      const scale = size / 0.8;
       const centerX = 32;
       const centerY = 32;
       
@@ -499,7 +528,7 @@
     }
 
     function spawnObstacle() {
-      const size = 0.4 + Math.random() * 0.6; // Random size between 0.4 and 1.0
+      const size = 0.4 + Math.random() * 0.6;
       const dogTexture = createPixelDog(size);
       
       const geo = new THREE.PlaneGeometry(size, size);
@@ -516,7 +545,6 @@
     }
 
     function reset() {
-      // Update highest score if current score is better
       if (score > highestScore) {
         highestScore = score;
       }
@@ -532,15 +560,13 @@
       fastFalling = false;
       jumpVel = 0;
       
-      // Remove all obstacles
       obstacles.forEach(o => scene.remove(o));
       obstacles = [];
       
-      // Show restart message with final score
       instructionsEl.innerHTML = `GAME OVER!<br>Final Score: ${score}<br>Best Score: ${highestScore}<br><small>Press SPACE or Click to Restart</small>`;
       instructionsEl.style.display = 'block';
       
-      debugEl.innerText = 'Press SPACE or Click to restart!';
+      debugEl.innerHTML = 'Press SPACE or Click to restart!';
       lastObstacleTime = Date.now();
     }
 
@@ -551,7 +577,7 @@
         // Handle jumping and falling
         if (jumping) {
           if (fastFalling) {
-            // Apply faster downward force when fast falling
+            // Keep applying fast fall force while button is held
             jumpVel = fastFallForce;
           } else {
             // Apply normal gravity
@@ -573,7 +599,7 @@
           const obstacle = obstacles[i];
           obstacle.position.x -= speed;
 
-          // Score when cat passes obstacle (improved scoring logic)
+          // Score when cat passes obstacle
           if (!obstacle.userData.scored && obstacle.position.x < cat.position.x) {
             obstacle.userData.scored = true;
             score++;
@@ -582,10 +608,10 @@
             // Speed increase every 3 points
             if (score % 3 === 0) {
               speed *= 1.2;
-              debugEl.innerText = `Speed boost! Level ${Math.floor(score/3) + 1}`;
+              debugEl.innerHTML = `Speed boost! Level ${Math.floor(score/3) + 1}`;
               debugEl.style.display = 'block';
               setTimeout(() => {
-                if (gameStarted) debugEl.innerText = 'Jump to avoid obstacles! | Down Arrow to Fast Fall';
+                if (gameStarted) debugEl.innerHTML = 'Jump to avoid obstacles!<br>Down Arrow to Fast Fall';
               }, 2000);
             }
           }
@@ -609,7 +635,7 @@
         // Spawn new obstacles with better timing
         if (Date.now() - lastObstacleTime > minObstacleGap) {
           const lastObstacle = obstacles[obstacles.length - 1];
-          const safeToSpawn = !lastObstacle || lastObstacle.position.x < 7; // Reduced from 6 to 7
+          const safeToSpawn = !lastObstacle || lastObstacle.position.x < 7;
           
           if (safeToSpawn) {
             spawnObstacle();
