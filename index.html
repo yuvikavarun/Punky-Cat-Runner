@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Punky Cat Runner</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #score {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #0ff;
+      font-family: monospace;
+      font-size: 18px;
+      z-index: 1;
+      text-shadow: 0 0 10px #0ff;
+    }
+    #debug {
+      position: absolute;
+      top: 40px;
+      left: 10px;
+      color: #ff0;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 1;
+    }
+    #instructions {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ff00ff;
+      font-family: monospace;
+      font-size: 24px;
+      text-align: center;
+      z-index: 1;
+      text-shadow: 0 0 15px #ff00ff;
+    }
+  </style>
+</head>
+<body>
+  <div id="score">Score: 0 | Best: 0</div>
+  <div id="debug">Press SPACE or Click to Jump! | Down Arrow to Fast Fall</div>
+  <div id="instructions">PUNKY CAT RUNNER<br><small>Press SPACE or Click to Start</small></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    let scene, camera, renderer;
+    let cat, obstacles = [], backgroundMesh;
+    let score = 0, highestScore = 0, speed = 0.02, jumpVel = 0, jumping = false;
+    let fastFalling = false;
+    const gravity = -0.005;
+    const jumpForce = 0.18;
+    const fastFallForce = -0.015; // Faster downward force
+    const groundY = -1.5;
+    const scoreEl = document.getElementById("score");
+    const debugEl = document.getElementById("debug");
+    const instructionsEl = document.getElementById("instructions");
+    let lastObstacleTime = 0;
+    const minObstacleGap = 600; // Reduced from 800 to 600ms
+    let gameStarted = false;
+    let gameOver = false;
+
+    init();
+    animate();
+
+    function init() {
+      scene = new THREE.Scene();
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 0.5, 5);
+
+      const ambient = new THREE.AmbientLight(0x4a00ff, 0.6);
+      const pointLight = new THREE.PointLight(0xff00ff, 1.5);
+      pointLight.position.set(2, 3, 3);
+      const pointLight2 = new THREE.PointLight(0x00ffff, 1);
+      pointLight2.position.set(-2, 2, 2);
+      scene.add(ambient, pointLight, pointLight2);
+
+      // Create fullscreen cyberpunk background
+      createCyberpunkBackground();
+      
+      // Create cat
+      createCat();
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        // Recreate background for new size
+        createCyberpunkBackground();
+      });
+
+      // Input handling
+      window.addEventListener("keydown", e => { 
+        if (e.code === "Space" || e.key === " " || e.keyCode === 32) {
+          e.preventDefault();
+          if (!gameStarted) {
+            startGame();
+          } else {
+            jump();
+          }
+        }
+        // Down arrow key for fast falling
+        if (e.code === "ArrowDown" || e.key === "ArrowDown" || e.keyCode === 40) {
+          e.preventDefault();
+          if (gameStarted && !gameOver) {
+            fastFall();
+          }
+        }
+      });
+      
+      window.addEventListener("keyup", e => {
+        if (e.code === "Space" || e.key === " " || e.keyCode === 32) {
+          e.preventDefault();
+        }
+        // Stop fast falling when down arrow is released
+        if (e.code === "ArrowDown" || e.key === "ArrowDown" || e.keyCode === 40) {
+          e.preventDefault();
+          fastFalling = false;
+        }
+      });
+      
+      renderer.domElement.addEventListener("click", e => {
+        if (!gameStarted) {
+          startGame();
+        } else {
+          jump();
+        }
+      });
+      
+      renderer.domElement.addEventListener("touchstart", e => {
+        e.preventDefault();
+        if (!gameStarted) {
+          startGame();
+        } else {
+          jump();
+        }
+      });
+    }
+
+    function createCyberpunkBackground() {
+      // Remove existing background
+      if (backgroundMesh) {
+        scene.remove(backgroundMesh);
+      }
+
+      // Calculate proper size for fullscreen coverage
+      const aspect = window.innerWidth / window.innerHeight;
+      const vFOV = THREE.MathUtils.degToRad(camera.fov);
+      const height = 2 * Math.tan(vFOV / 2) * Math.abs(camera.position.z - (-5));
+      const width = height * aspect;
+
+      // Create high-resolution canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = Math.floor(2048 / aspect);
+      const ctx = canvas.getContext('2d');
+      
+      ctx.imageSmoothingEnabled = false;
+      
+      // Sky gradient - neon purple to black
+      const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.4);
+      skyGradient.addColorStop(0, '#1a0033');  // Dark purple
+      skyGradient.addColorStop(0.3, '#330066'); // Medium purple
+      skyGradient.addColorStop(0.6, '#4a0080'); // Bright purple
+      skyGradient.addColorStop(0.8, '#660099'); // Neon purple
+      skyGradient.addColorStop(1, '#000000');   // Black
+      
+      ctx.fillStyle = skyGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height * 0.4);
+      
+      // Ground gradient - black to dark purple
+      const groundGradient = ctx.createLinearGradient(0, canvas.height * 0.4, 0, canvas.height);
+      groundGradient.addColorStop(0, '#000000');
+      groundGradient.addColorStop(0.3, '#1a0033');
+      groundGradient.addColorStop(0.7, '#0d001a');
+      groundGradient.addColorStop(1, '#000000');
+      
+      ctx.fillStyle = groundGradient;
+      ctx.fillRect(0, canvas.height * 0.4, canvas.width, canvas.height * 0.6);
+      
+      // Create detailed cyberpunk city skyline
+      const buildings = [];
+      const buildingCount = 25;
+      const buildingWidth = canvas.width / buildingCount;
+      
+      for (let i = 0; i < buildingCount; i++) {
+        buildings.push({
+          x: i * buildingWidth,
+          width: buildingWidth + Math.random() * 20,
+          height: 50 + Math.random() * 200,
+          windows: Math.floor(Math.random() * 8) + 3,
+          color: Math.random() > 0.5 ? '#ff00ff' : '#00ffff'
+        });
+      }
+      
+      // Draw buildings
+      buildings.forEach(building => {
+        const buildingTop = canvas.height * 0.4 - building.height;
+        
+        // Building silhouette
+        ctx.fillStyle = '#000022';
+        ctx.fillRect(building.x, buildingTop, building.width, building.height);
+        
+        // Building outline glow
+        ctx.strokeStyle = building.color;
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = building.color;
+        ctx.strokeRect(building.x, buildingTop, building.width, building.height);
+        
+        // Windows
+        const windowRows = Math.floor(building.height / 25);
+        const windowCols = Math.floor(building.width / 20);
+        
+        for (let row = 0; row < windowRows; row++) {
+          for (let col = 0; col < windowCols; col++) {
+            if (Math.random() > 0.4) {
+              ctx.fillStyle = Math.random() > 0.5 ? '#00ffff' : '#ff00ff';
+              ctx.shadowBlur = 5;
+              ctx.shadowColor = ctx.fillStyle;
+              ctx.fillRect(
+                building.x + col * 20 + 5,
+                buildingTop + row * 25 + 5,
+                10, 15
+              );
+            }
+          }
+        }
+        
+        // Antenna/spires
+        if (Math.random() > 0.7) {
+          ctx.strokeStyle = '#ff00ff';
+          ctx.lineWidth = 3;
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = '#ff00ff';
+          ctx.beginPath();
+          ctx.moveTo(building.x + building.width/2, buildingTop);
+          ctx.lineTo(building.x + building.width/2, buildingTop - 30);
+          ctx.stroke();
+          
+          // Antenna light
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = '#ffffff';
+          ctx.fillRect(building.x + building.width/2 - 2, buildingTop - 35, 4, 4);
+        }
+      });
+      
+      // Reset shadow
+      ctx.shadowBlur = 0;
+      
+      // Perspective grid on ground
+      ctx.strokeStyle = '#ff00ff';
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.3;
+      
+      const vanishingPoint = {x: canvas.width/2, y: canvas.height * 0.35};
+      const gridLines = 30;
+      
+      for (let i = 0; i <= gridLines; i++) {
+        const x = (i / gridLines) * canvas.width;
+        ctx.beginPath();
+        ctx.moveTo(x, canvas.height);
+        ctx.lineTo(vanishingPoint.x, vanishingPoint.y);
+        ctx.stroke();
+      }
+      
+      // Horizontal grid lines
+      for (let i = 0; i < 10; i++) {
+        const y = canvas.height * 0.4 + (i * (canvas.height * 0.6 / 10));
+        ctx.globalAlpha = 0.2 - (i * 0.02);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+      
+      // Floating particles/stars
+      ctx.globalAlpha = 0.8;
+      for (let i = 0; i < 100; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height * 0.6;
+        const size = Math.random() * 3 + 1;
+        const brightness = Math.random();
+        
+        ctx.fillStyle = brightness > 0.5 ? '#ff00ff' : '#00ffff';
+        ctx.shadowBlur = size * 2;
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.fillRect(x, y, size, size);
+      }
+      
+      // Reset context
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      
+      // Create texture
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      
+      const bgGeo = new THREE.PlaneGeometry(width, height);
+      const bgMat = new THREE.MeshBasicMaterial({ map: texture });
+      backgroundMesh = new THREE.Mesh(bgGeo, bgMat);
+      backgroundMesh.position.z = -5;
+      scene.add(backgroundMesh);
+    }
+
+    function createCat() {
+      // Create pixel art cyberpunk cat
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      
+      ctx.imageSmoothingEnabled = false;
+      
+      // Cat body
+      ctx.fillStyle = '#ff00ff';
+      ctx.fillRect(20, 35, 24, 20);
+      
+      // Cat head
+      ctx.fillRect(18, 20, 28, 20);
+      
+      // Cat ears
+      ctx.fillRect(16, 15, 8, 10);
+      ctx.fillRect(40, 15, 8, 10);
+      
+      // Inner ears
+      ctx.fillStyle = '#ff0080';
+      ctx.fillRect(18, 17, 4, 6);
+      ctx.fillRect(42, 17, 4, 6);
+      
+      // Cat legs
+      ctx.fillStyle = '#ff00ff';
+      ctx.fillRect(22, 50, 6, 10);
+      ctx.fillRect(36, 50, 6, 10);
+      ctx.fillRect(25, 48, 6, 12);
+      ctx.fillRect(33, 48, 6, 12);
+      
+      // Cat tail
+      ctx.fillRect(44, 38, 12, 6);
+      ctx.fillRect(52, 32, 6, 10);
+      
+      // Eyes
+      ctx.fillStyle = '#00ffff';
+      ctx.fillRect(22, 25, 4, 4);
+      ctx.fillRect(38, 25, 4, 4);
+      
+      // Eye glow
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(23, 26, 1, 1);
+      ctx.fillRect(39, 26, 1, 1);
+      
+      // Nose
+      ctx.fillStyle = '#ff0080';
+      ctx.fillRect(31, 30, 2, 2);
+      
+      // Cyberpunk collar
+      ctx.fillStyle = '#00ffff';
+      ctx.fillRect(19, 38, 26, 3);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      
+      const catGeo = new THREE.PlaneGeometry(1, 1);
+      const catMat = new THREE.MeshBasicMaterial({ 
+        map: texture,
+        transparent: true,
+        alphaTest: 0.1
+      });
+      cat = new THREE.Mesh(catGeo, catMat);
+      cat.position.set(-2, groundY + 0.5, 0);
+      scene.add(cat);
+    }
+
+    function startGame() {
+      gameStarted = true;
+      gameOver = false;
+      score = 0; // Reset score when starting a new game
+      speed = 0.02; // Reset speed
+      scoreEl.innerText = `Score: ${score} | Best: ${highestScore}`;
+      instructionsEl.style.display = 'none';
+      debugEl.innerText = 'Jump to avoid obstacles! | Down Arrow to Fast Fall';
+      // Set to trigger first obstacle immediately
+      lastObstacleTime = Date.now() - minObstacleGap - 100;
+      // Spawn the first obstacle right away
+      setTimeout(() => {
+        if (gameStarted && !gameOver) {
+          spawnObstacle();
+        }
+      }, 300); // First obstacle appears after 300ms
+    }
+
+    function jump() {
+      if (!jumping && gameStarted && !gameOver) {
+        jumpVel = jumpForce;
+        jumping = true;
+        fastFalling = false; // Stop fast falling when jumping
+      }
+    }
+
+    function fastFall() {
+      if (jumping && cat.position.y > groundY + 0.5) {
+        fastFalling = true;
+      }
+    }
+
+    function createPixelDog(size) {
+      // Create pixel art dog with different sizes
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      
+      ctx.imageSmoothingEnabled = false;
+      
+      // Scale based on size (0.5 to 1.5)
+      const scale = size / 0.8; // Normalize to make scaling more visible
+      const centerX = 32;
+      const centerY = 32;
+      
+      // Helper function to draw scaled rectangles
+      function drawRect(x, y, w, h, color) {
+        ctx.fillStyle = color;
+        const scaledX = centerX + (x - centerX) * scale;
+        const scaledY = centerY + (y - centerY) * scale;
+        const scaledW = w * scale;
+        const scaledH = h * scale;
+        ctx.fillRect(scaledX - scaledW/2, scaledY - scaledH/2, scaledW, scaledH);
+      }
+      
+      // Dog body
+      drawRect(32, 40, 20, 12, '#ff0080');
+      
+      // Dog head
+      drawRect(32, 25, 16, 14, '#ff0080');
+      
+      // Dog ears
+      drawRect(26, 18, 6, 8, '#ff0080');
+      drawRect(38, 18, 6, 8, '#ff0080');
+      
+      // Inner ears
+      drawRect(26, 19, 3, 5, '#ff00ff');
+      drawRect(38, 19, 3, 5, '#ff00ff');
+      
+      // Dog legs
+      drawRect(25, 48, 4, 8, '#ff0080');
+      drawRect(32, 48, 4, 8, '#ff0080');
+      drawRect(39, 48, 4, 8, '#ff0080');
+      drawRect(46, 48, 4, 8, '#ff0080');
+      
+      // Dog tail
+      drawRect(48, 38, 8, 4, '#ff0080');
+      drawRect(54, 33, 4, 6, '#ff0080');
+      
+      // Dog eyes
+      drawRect(29, 22, 3, 3, '#00ffff');
+      drawRect(35, 22, 3, 3, '#00ffff');
+      
+      // Eye glow
+      drawRect(29, 22, 1, 1, '#ffffff');
+      drawRect(35, 22, 1, 1, '#ffffff');
+      
+      // Dog nose
+      drawRect(32, 27, 2, 2, '#000000');
+      
+      // Dog mouth
+      drawRect(30, 29, 1, 1, '#000000');
+      drawRect(34, 29, 1, 1, '#000000');
+      drawRect(32, 30, 1, 1, '#000000');
+      
+      // Dog collar
+      drawRect(32, 34, 18, 3, '#00ffff');
+      
+      // Collar details
+      drawRect(28, 34, 2, 1, '#ffffff');
+      drawRect(32, 34, 2, 1, '#ffffff');
+      drawRect(36, 34, 2, 1, '#ffffff');
+      
+      // Paw details
+      drawRect(25, 54, 3, 2, '#ff00ff');
+      drawRect(32, 54, 3, 2, '#ff00ff');
+      drawRect(39, 54, 3, 2, '#ff00ff');
+      drawRect(46, 54, 3, 2, '#ff00ff');
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      
+      return texture;
+    }
+
+    function spawnObstacle() {
+      const size = 0.4 + Math.random() * 0.6; // Random size between 0.4 and 1.0
+      const dogTexture = createPixelDog(size);
+      
+      const geo = new THREE.PlaneGeometry(size, size);
+      const mat = new THREE.MeshBasicMaterial({ 
+        map: dogTexture,
+        transparent: true,
+        alphaTest: 0.1
+      });
+      const ob = new THREE.Mesh(geo, mat);
+      ob.position.set(10, groundY + size/2, 0);
+      ob.userData = { scored: false };
+      scene.add(ob);
+      obstacles.push(ob);
+    }
+
+    function reset() {
+      // Update highest score if current score is better
+      if (score > highestScore) {
+        highestScore = score;
+      }
+      
+      speed = 0.02;
+      gameOver = true;
+      gameStarted = false;
+      
+      if (cat) {
+        cat.position.y = groundY + 0.5;
+      }
+      jumping = false;
+      fastFalling = false;
+      jumpVel = 0;
+      
+      // Remove all obstacles
+      obstacles.forEach(o => scene.remove(o));
+      obstacles = [];
+      
+      // Show restart message with final score
+      instructionsEl.innerHTML = `GAME OVER!<br>Final Score: ${score}<br>Best Score: ${highestScore}<br><small>Press SPACE or Click to Restart</small>`;
+      instructionsEl.style.display = 'block';
+      
+      debugEl.innerText = 'Press SPACE or Click to restart!';
+      lastObstacleTime = Date.now();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (cat && gameStarted && !gameOver) {
+        // Handle jumping and falling
+        if (jumping) {
+          if (fastFalling) {
+            // Apply faster downward force when fast falling
+            jumpVel = fastFallForce;
+          } else {
+            // Apply normal gravity
+            jumpVel += gravity;
+          }
+          
+          cat.position.y += jumpVel;
+          
+          if (cat.position.y <= groundY + 0.5) {
+            cat.position.y = groundY + 0.5;
+            jumping = false;
+            fastFalling = false;
+            jumpVel = 0;
+          }
+        }
+
+        // Move obstacles and handle scoring
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          const obstacle = obstacles[i];
+          obstacle.position.x -= speed;
+
+          // Score when cat passes obstacle (improved scoring logic)
+          if (!obstacle.userData.scored && obstacle.position.x < cat.position.x) {
+            obstacle.userData.scored = true;
+            score++;
+            scoreEl.innerText = `Score: ${score} | Best: ${highestScore}`;
+            
+            // Speed increase every 3 points
+            if (score % 3 === 0) {
+              speed *= 1.2;
+              debugEl.innerText = `Speed boost! Level ${Math.floor(score/3) + 1}`;
+              debugEl.style.display = 'block';
+              setTimeout(() => {
+                if (gameStarted) debugEl.innerText = 'Jump to avoid obstacles! | Down Arrow to Fast Fall';
+              }, 2000);
+            }
+          }
+
+          // Collision detection
+          if (obstacle.position.x < cat.position.x + 0.3 &&
+              obstacle.position.x > cat.position.x - 0.3 &&
+              obstacle.position.y < cat.position.y + 0.3 &&
+              obstacle.position.y > cat.position.y - 0.3) {
+            reset();
+            return;
+          }
+
+          // Remove obstacles that are off screen
+          if (obstacle.position.x < -8) {
+            scene.remove(obstacle);
+            obstacles.splice(i, 1);
+          }
+        }
+
+        // Spawn new obstacles with better timing
+        if (Date.now() - lastObstacleTime > minObstacleGap) {
+          const lastObstacle = obstacles[obstacles.length - 1];
+          const safeToSpawn = !lastObstacle || lastObstacle.position.x < 7; // Reduced from 6 to 7
+          
+          if (safeToSpawn) {
+            spawnObstacle();
+            lastObstacleTime = Date.now();
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html>
